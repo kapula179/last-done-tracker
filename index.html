@@ -282,7 +282,11 @@
 
     dialog::backdrop { background: rgb(0 0 0 / 65%); backdrop-filter: blur(3px); }
     dialog h2 { margin: 0 0 1rem; font-size: 1.15rem; }
+    .dialog-field { display: grid; gap: .4rem; margin-top: .85rem; }
+    .dialog-field:first-of-type { margin-top: 0; }
+    .dialog-label { color: var(--muted); font-size: .82rem; font-weight: 700; }
     .dialog-input { width: 100%; }
+    .dialog-help { margin: 0; color: var(--muted); font-size: .75rem; }
     .dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
 
     .toast {
@@ -383,9 +387,16 @@
 
   <dialog id="editDialog">
     <form id="editForm" method="dialog">
-      <h2>名前を変更</h2>
-      <label class="sr-only" for="editName">新しい名前</label>
-      <input class="dialog-input" id="editName" maxlength="80" required>
+      <h2>項目を編集</h2>
+      <div class="dialog-field">
+        <label class="dialog-label" for="editName">名前</label>
+        <input class="dialog-input" id="editName" maxlength="80" required>
+      </div>
+      <div class="dialog-field">
+        <label class="dialog-label" for="editLastDone">最終日時</label>
+        <input class="dialog-input" id="editLastDone" type="datetime-local">
+        <p class="dialog-help">空欄で保存すると「まだ記録なし」に戻ります。</p>
+      </div>
       <div class="dialog-actions">
         <button class="secondary-button" type="button" id="cancelEdit">キャンセル</button>
         <button class="primary-button" type="submit">保存</button>
@@ -416,6 +427,7 @@
         editDialog: document.querySelector("#editDialog"),
         editForm: document.querySelector("#editForm"),
         editName: document.querySelector("#editName"),
+        editLastDone: document.querySelector("#editLastDone"),
         cancelEdit: document.querySelector("#cancelEdit"),
         exportButton: document.querySelector("#exportButton"),
         importButton: document.querySelector("#importButton"),
@@ -487,6 +499,13 @@
         const node = document.createElement("span");
         node.textContent = value;
         return node.innerHTML;
+      }
+
+      function toLocalDateTimeValue(iso) {
+        if (!iso) return "";
+        const date = new Date(iso);
+        const offset = date.getTimezoneOffset() * 60000;
+        return new Date(date.getTime() - offset).toISOString().slice(0, 16);
       }
 
       function render() {
@@ -588,6 +607,8 @@
         } else if (button.dataset.action === "edit") {
           state.editingId = item.id;
           elements.editName.value = item.name;
+          elements.editLastDone.value = toLocalDateTimeValue(item.lastDone);
+          elements.editLastDone.max = toLocalDateTimeValue(new Date().toISOString());
           elements.editDialog.showModal();
           requestAnimationFrame(() => elements.editName.select());
         } else if (button.dataset.action === "delete" && confirm(`「${item.name}」を削除しますか？`)) {
@@ -608,7 +629,15 @@
         const item = findItem(state.editingId);
         const name = cleanName(elements.editName.value);
         if (!item || !name) return;
+        const lastDone = elements.editLastDone.value
+          ? new Date(elements.editLastDone.value)
+          : null;
+        if (lastDone && (Number.isNaN(lastDone.getTime()) || lastDone.getTime() > Date.now())) {
+          showToast("最終日時は現在以前を指定してください");
+          return;
+        }
         item.name = name;
+        item.lastDone = lastDone ? lastDone.toISOString() : null;
         save();
         render();
         elements.editDialog.close();
