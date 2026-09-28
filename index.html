@@ -181,12 +181,33 @@
       padding: 1rem;
     }
 
+    .item-title-row {
+      display: flex;
+      align-items: center;
+      gap: .35rem;
+      margin: 0 0 .2rem;
+    }
+
     .item-name {
       overflow-wrap: anywhere;
-      margin: 0 0 .2rem;
+      margin: 0;
       font-size: 1rem;
       font-weight: 750;
     }
+
+    .favorite-button {
+      flex: 0 0 auto;
+      width: 2.65rem;
+      height: 2.65rem;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--amber);
+      font-size: 1.55rem;
+      line-height: 1;
+    }
+
+    .favorite-button:active { background: var(--surface-2); transform: scale(.94); }
 
     .elapsed {
       display: block;
@@ -453,6 +474,7 @@
           state.items = candidates.slice(0, MAX_ITEMS).map((item) => ({
             id: String(item.id || makeId()),
             name: cleanName(item.name),
+            favorite: item.favorite === true,
             lastDone: item.lastDone && !Number.isNaN(Date.parse(item.lastDone)) ? new Date(item.lastDone).toISOString() : null,
             createdAt: item.createdAt && !Number.isNaN(Date.parse(item.createdAt)) ? new Date(item.createdAt).toISOString() : new Date().toISOString()
           })).filter((item) => item.name);
@@ -468,6 +490,7 @@
 
       function sortItems(items) {
         return [...items].sort((a, b) => {
+          if (a.favorite !== b.favorite) return Number(b.favorite) - Number(a.favorite);
           if (!a.lastDone && b.lastDone) return -1;
           if (a.lastDone && !b.lastDone) return 1;
           return Date.parse(a.lastDone || a.createdAt) - Date.parse(b.lastDone || b.createdAt);
@@ -510,7 +533,10 @@
           <li class="item-card" data-id="${escapeHtml(item.id)}">
             <div class="item-main">
               <div>
-                <p class="item-name">${escapeHtml(item.name)}</p>
+                <div class="item-title-row">
+                  <button class="favorite-button" type="button" data-action="favorite" aria-pressed="${item.favorite}" aria-label="${escapeHtml(item.name)}を${item.favorite ? "お気に入りから外す" : "お気に入りに追加"}">${item.favorite ? "★" : "☆"}</button>
+                  <p class="item-name">${escapeHtml(item.name)}</p>
+                </div>
                 <strong class="elapsed">${elapsedText(item.lastDone)}</strong>
                 <p class="last-date">${item.lastDone ? `前回 ${exactDate.format(new Date(item.lastDone))}` : "「今やった」で最初の日時を記録"}</p>
               </div>
@@ -561,7 +587,7 @@
         const clean = cleanName(name);
         if (!clean) throw new Error("名前を入力してください");
         if (state.items.length >= MAX_ITEMS) throw new Error("項目数の上限に達しました");
-        const item = { id: makeId(), name: clean, lastDone: null, createdAt: new Date().toISOString() };
+        const item = { id: makeId(), name: clean, favorite: false, lastDone: null, createdAt: new Date().toISOString() };
         state.items.push(item);
         save();
         render();
@@ -610,6 +636,12 @@
           if (confirm(`「${item.name}」を今やったとして記録しますか？`)) {
             markDone(item.id);
           }
+        } else if (button.dataset.action === "favorite") {
+          item.favorite = !item.favorite;
+          save();
+          render();
+          showToast(item.favorite ? `${item.name}をお気に入りに追加しました` : `${item.name}をお気に入りから外しました`);
+          void requestPersistence();
         } else if (button.dataset.action === "edit") {
           state.editingId = item.id;
           elements.editName.value = item.name;
