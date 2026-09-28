@@ -658,14 +658,33 @@
         if (undo) undo();
       });
 
-      elements.exportButton.addEventListener("click", () => {
+      elements.exportButton.addEventListener("click", async () => {
         const body = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), items: state.items }, null, 2);
+        const baseName = `last-done-backup-${new Date().toISOString().slice(0, 10)}`;
+        const sharedFile = new File([body], `${baseName}.txt`, { type: "text/plain" });
+
+        if (navigator.canShare?.({ files: [sharedFile] })) {
+          try {
+            await navigator.share({
+              files: [sharedFile],
+              title: "いつやった？ バックアップ"
+            });
+            showToast("バックアップを書き出しました");
+            return;
+          } catch (error) {
+            if (error.name === "AbortError") return;
+            console.error("共有画面を開けませんでした", error);
+          }
+        }
+
         const blob = new Blob([body], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = `last-done-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        link.download = `${baseName}.json`;
+        document.body.append(link);
         link.click();
+        link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       });
 
