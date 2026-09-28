@@ -481,13 +481,9 @@
         const minutes = Math.floor(seconds / 60);
         if (minutes < 60) return `${minutes}分前`;
         const hours = Math.floor(minutes / 60);
-        if (hours < 24) return `${hours}時間前`;
+        if (hours < 24) return `${hours}時間 ${minutes % 60}分前`;
         const days = Math.floor(hours / 24);
-        if (days < 31) return `${days}日前`;
-        const months = Math.floor(days / 30.44);
-        if (months < 12) return `${months}か月前`;
-        const years = Math.floor(days / 365.25);
-        return `${years}年前`;
+        return `${days}日 ${hours % 24}時間 ${minutes % 60}分前`;
       }
 
       const exactDate = new Intl.DateTimeFormat("ja-JP", {
@@ -529,6 +525,14 @@
         elements.emptyState.hidden = items.length > 0;
         elements.itemList.hidden = items.length === 0;
         elements.summary.textContent = `${items.length}件`;
+      }
+
+      function updateElapsedTimes() {
+        elements.itemList.querySelectorAll(".item-card").forEach((card) => {
+          const item = findItem(card.dataset.id);
+          const elapsed = card.querySelector(".elapsed");
+          if (item && elapsed) elapsed.textContent = elapsedText(item.lastDone);
+        });
       }
 
       async function requestPersistence() {
@@ -731,8 +735,8 @@
       load();
       render();
       registerWebMCP();
-      setInterval(render, 60000);
-      document.addEventListener("visibilitychange", () => { if (!document.hidden) render(); });
+      setInterval(() => { if (!document.hidden) updateElapsedTimes(); }, 60000);
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) updateElapsedTimes(); });
     })();
   </script>
 </body>
