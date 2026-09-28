@@ -607,7 +607,9 @@
         const item = findItem(card.dataset.id);
         if (!item) return;
         if (button.dataset.action === "done") {
-          markDone(item.id);
+          if (confirm(`「${item.name}」を今やったとして記録しますか？`)) {
+            markDone(item.id);
+          }
         } else if (button.dataset.action === "edit") {
           state.editingId = item.id;
           elements.editName.value = item.name;
