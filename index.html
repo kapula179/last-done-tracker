@@ -154,7 +154,26 @@
       letter-spacing: .03em;
     }
 
+    .list-heading-actions {
+      display: flex;
+      align-items: center;
+      gap: .65rem;
+    }
+
     .summary { margin: 0; color: var(--muted); font-size: .8rem; }
+
+    .sort-button {
+      min-height: 2.35rem;
+      border: 1px solid var(--line);
+      border-radius: .7rem;
+      background: var(--surface);
+      color: var(--text);
+      padding: 0 .75rem;
+      font-size: .82rem;
+      font-weight: 700;
+    }
+
+    .sort-button:active { background: var(--surface-2); transform: translateY(1px); }
 
     .item-list {
       display: grid;
@@ -219,7 +238,17 @@
       line-height: 1.15;
     }
 
-    .last-date { margin: .25rem 0 0; color: var(--muted); font-size: .8rem; }
+    .item-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: .25rem .75rem;
+      margin: .25rem 0 0;
+      color: var(--muted);
+      font-size: .8rem;
+    }
+
+    .done-count { color: var(--mint); font-weight: 750; }
 
     .done-button {
       min-width: 5.7rem;
@@ -253,6 +282,7 @@
 
     .text-button:active { background: var(--surface-2); color: var(--text); }
     .text-button.danger { color: var(--danger); }
+    .text-button:disabled { color: #667384; cursor: default; opacity: .65; }
 
     .empty {
       border: 1px dashed var(--line);
@@ -309,6 +339,31 @@
     .dialog-input { width: 100%; }
     .dialog-help { margin: 0; color: var(--muted); font-size: .75rem; }
     .dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
+
+    .history-summary { margin: -.65rem 0 1rem; color: var(--muted); font-size: .85rem; }
+
+    .history-list {
+      display: grid;
+      gap: .5rem;
+      max-height: min(55vh, 26rem);
+      margin: 0;
+      padding: 0;
+      overflow-y: auto;
+      list-style: none;
+    }
+
+    .history-list li {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      border: 1px solid var(--line);
+      border-radius: .75rem;
+      background: var(--surface-2);
+      padding: .7rem .8rem;
+    }
+
+    .history-number { min-width: 2.5rem; color: var(--mint); font-size: .78rem; font-weight: 800; }
+    .history-date { font-size: .9rem; }
 
     .toast {
       position: fixed;
@@ -384,8 +439,11 @@
       </form>
 
       <div class="list-heading">
-        <h2>古い順</h2>
-        <p class="summary" id="summary">0件</p>
+        <h2 id="sortHeading">古い順</h2>
+        <div class="list-heading-actions">
+          <p class="summary" id="summary">0件</p>
+          <button class="sort-button" id="sortButton" type="button" aria-describedby="sortHeading">新しい順にする</button>
+        </div>
       </div>
 
       <div class="empty" id="emptyState">
@@ -416,11 +474,22 @@
       <div class="dialog-field">
         <label class="dialog-label" for="editLastDone">最終日時</label>
         <input class="dialog-input" id="editLastDone" type="datetime-local">
-        <p class="dialog-help">空欄で保存すると「まだ記録なし」に戻ります。</p>
+        <p class="dialog-help">空欄で保存すると、履歴もすべて削除して「まだ記録なし」に戻ります。</p>
       </div>
       <div class="dialog-actions">
         <button class="secondary-button" type="button" id="cancelEdit">キャンセル</button>
         <button class="primary-button" type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="historyDialog">
+    <form method="dialog">
+      <h2 id="historyTitle">履歴</h2>
+      <p class="history-summary" id="historySummary"></p>
+      <ol class="history-list" id="historyList"></ol>
+      <div class="dialog-actions">
+        <button class="primary-button" type="submit">閉じる</button>
       </div>
     </form>
   </dialog>
@@ -435,14 +504,17 @@
       "use strict";
 
       const STORAGE_KEY = "last-done-tracker:v1";
+      const SORT_ORDER_KEY = "last-done-tracker:sort-order";
       const MAX_ITEMS = 1000;
-      const state = { items: [], editingId: null, undo: null, toastTimer: null };
+      const state = { items: [], sortOrder: "oldest", editingId: null, undo: null, toastTimer: null };
 
       const elements = {
         addForm: document.querySelector("#addForm"),
         newItem: document.querySelector("#newItem"),
         itemList: document.querySelector("#itemList"),
         emptyState: document.querySelector("#emptyState"),
+        sortHeading: document.querySelector("#sortHeading"),
+        sortButton: document.querySelector("#sortButton"),
         summary: document.querySelector("#summary"),
         storageStatus: document.querySelector("#storageStatus"),
         editDialog: document.querySelector("#editDialog"),
@@ -450,6 +522,10 @@
         editName: document.querySelector("#editName"),
         editLastDone: document.querySelector("#editLastDone"),
         cancelEdit: document.querySelector("#cancelEdit"),
+        historyDialog: document.querySelector("#historyDialog"),
+        historyTitle: document.querySelector("#historyTitle"),
+        historySummary: document.querySelector("#historySummary"),
+        historyList: document.querySelector("#historyList"),
         exportButton: document.querySelector("#exportButton"),
         importButton: document.querySelector("#importButton"),
         importFile: document.querySelector("#importFile"),
@@ -468,16 +544,30 @@
 
       function load() {
         try {
+          state.sortOrder = localStorage.getItem(SORT_ORDER_KEY) === "newest" ? "newest" : "oldest";
           const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
           const candidates = Array.isArray(parsed) ? parsed : parsed?.items;
           if (!Array.isArray(candidates)) return;
-          state.items = candidates.slice(0, MAX_ITEMS).map((item) => ({
-            id: String(item.id || makeId()),
-            name: cleanName(item.name),
-            favorite: item.favorite === true,
-            lastDone: item.lastDone && !Number.isNaN(Date.parse(item.lastDone)) ? new Date(item.lastDone).toISOString() : null,
-            createdAt: item.createdAt && !Number.isNaN(Date.parse(item.createdAt)) ? new Date(item.createdAt).toISOString() : new Date().toISOString()
-          })).filter((item) => item.name);
+          state.items = candidates.slice(0, MAX_ITEMS).map((item) => {
+            const history = Array.isArray(item.history)
+              ? item.history
+                .filter((date) => date && !Number.isNaN(Date.parse(date)))
+                .map((date) => new Date(date).toISOString())
+              : [];
+            const legacyLastDone = item.lastDone && !Number.isNaN(Date.parse(item.lastDone))
+              ? new Date(item.lastDone).toISOString()
+              : null;
+            if (legacyLastDone && !history.includes(legacyLastDone)) history.push(legacyLastDone);
+            history.sort((a, b) => Date.parse(a) - Date.parse(b));
+            return {
+              id: String(item.id || makeId()),
+              name: cleanName(item.name),
+              favorite: item.favorite === true,
+              history,
+              lastDone: history.at(-1) || null,
+              createdAt: item.createdAt && !Number.isNaN(Date.parse(item.createdAt)) ? new Date(item.createdAt).toISOString() : new Date().toISOString()
+            };
+          }).filter((item) => item.name);
         } catch (error) {
           console.error("保存データを読み込めませんでした", error);
           elements.storageStatus.textContent = "読込エラー";
@@ -485,15 +575,16 @@
       }
 
       function save() {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, items: state.items }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, items: state.items }));
       }
 
       function sortItems(items) {
         return [...items].sort((a, b) => {
           if (a.favorite !== b.favorite) return Number(b.favorite) - Number(a.favorite);
-          if (!a.lastDone && b.lastDone) return -1;
-          if (a.lastDone && !b.lastDone) return 1;
-          return Date.parse(a.lastDone || a.createdAt) - Date.parse(b.lastDone || b.createdAt);
+          const direction = state.sortOrder === "newest" ? -1 : 1;
+          if (!a.lastDone && b.lastDone) return -direction;
+          if (a.lastDone && !b.lastDone) return direction;
+          return direction * (Date.parse(a.lastDone || a.createdAt) - Date.parse(b.lastDone || b.createdAt));
         });
       }
 
@@ -538,11 +629,15 @@
                   <p class="item-name">${escapeHtml(item.name)}</p>
                 </div>
                 <strong class="elapsed">${elapsedText(item.lastDone)}</strong>
-                <p class="last-date">${item.lastDone ? `前回 ${exactDate.format(new Date(item.lastDone))}` : "「今やった」で最初の日時を記録"}</p>
+                <p class="item-meta">
+                  <span>${item.lastDone ? `前回 ${exactDate.format(new Date(item.lastDone))}` : "「今やった」で最初の日時を記録"}</span>
+                  <span class="done-count">累計 ${item.history.length}回</span>
+                </p>
               </div>
               <button class="done-button" type="button" data-action="done">今やった</button>
             </div>
             <div class="item-tools">
+              <button class="text-button" type="button" data-action="history" ${item.history.length ? "" : "disabled"}>履歴</button>
               <button class="text-button" type="button" data-action="edit">編集</button>
               <button class="text-button danger" type="button" data-action="delete">削除</button>
             </div>
@@ -551,6 +646,10 @@
         elements.emptyState.hidden = items.length > 0;
         elements.itemList.hidden = items.length === 0;
         elements.summary.textContent = `${items.length}件`;
+        const isOldest = state.sortOrder === "oldest";
+        elements.sortHeading.textContent = isOldest ? "古い順" : "新しい順";
+        elements.sortButton.textContent = isOldest ? "新しい順にする" : "古い順にする";
+        elements.sortButton.setAttribute("aria-label", `${isOldest ? "新しい順" : "古い順"}に並べ替える`);
       }
 
       function updateElapsedTimes() {
@@ -587,7 +686,7 @@
         const clean = cleanName(name);
         if (!clean) throw new Error("名前を入力してください");
         if (state.items.length >= MAX_ITEMS) throw new Error("項目数の上限に達しました");
-        const item = { id: makeId(), name: clean, favorite: false, lastDone: null, createdAt: new Date().toISOString() };
+        const item = { id: makeId(), name: clean, favorite: false, history: [], lastDone: null, createdAt: new Date().toISOString() };
         state.items.push(item);
         save();
         render();
@@ -602,12 +701,17 @@
       function markDone(id, doneAt = new Date()) {
         const item = findItem(id);
         if (!item) throw new Error("項目が見つかりません");
-        const previous = item.lastDone;
-        item.lastDone = doneAt.toISOString();
+        const previousLastDone = item.lastDone;
+        const previousHistory = [...item.history];
+        const recordedAt = doneAt.toISOString();
+        item.history.push(recordedAt);
+        item.history.sort((a, b) => Date.parse(a) - Date.parse(b));
+        item.lastDone = item.history.at(-1) || null;
         save();
         render();
         showToast(`${item.name}を記録しました`, () => {
-          item.lastDone = previous;
+          item.history = previousHistory;
+          item.lastDone = previousLastDone;
           save();
           render();
         });
@@ -626,6 +730,12 @@
         }
       });
 
+      elements.sortButton.addEventListener("click", () => {
+        state.sortOrder = state.sortOrder === "oldest" ? "newest" : "oldest";
+        localStorage.setItem(SORT_ORDER_KEY, state.sortOrder);
+        render();
+      });
+
       elements.itemList.addEventListener("click", (event) => {
         const button = event.target.closest("button[data-action]");
         const card = event.target.closest("[data-id]");
@@ -642,6 +752,16 @@
           render();
           showToast(item.favorite ? `${item.name}をお気に入りに追加しました` : `${item.name}をお気に入りから外しました`);
           void requestPersistence();
+        } else if (button.dataset.action === "history") {
+          elements.historyTitle.textContent = `${item.name}の履歴`;
+          elements.historySummary.textContent = `累計 ${item.history.length}回`;
+          elements.historyList.innerHTML = [...item.history].reverse().map((date, index) => `
+            <li>
+              <span class="history-number">#${item.history.length - index}</span>
+              <time class="history-date" datetime="${date}">${exactDate.format(new Date(date))}</time>
+            </li>
+          `).join("");
+          elements.historyDialog.showModal();
         } else if (button.dataset.action === "edit") {
           state.editingId = item.id;
           elements.editName.value = item.name;
@@ -675,7 +795,16 @@
           return;
         }
         item.name = name;
-        item.lastDone = lastDone ? lastDone.toISOString() : null;
+        if (lastDone) {
+          const editedAt = lastDone.toISOString();
+          if (item.history.length) item.history[item.history.length - 1] = editedAt;
+          else item.history.push(editedAt);
+          item.history.sort((a, b) => Date.parse(a) - Date.parse(b));
+          item.lastDone = item.history.at(-1) || null;
+        } else {
+          item.history = [];
+          item.lastDone = null;
+        }
         save();
         render();
         elements.editDialog.close();
@@ -691,7 +820,7 @@
       });
 
       elements.exportButton.addEventListener("click", async () => {
-        const body = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), items: state.items }, null, 2);
+        const body = JSON.stringify({ version: 2, exportedAt: new Date().toISOString(), items: state.items }, null, 2);
         const baseName = `last-done-backup-${new Date().toISOString().slice(0, 10)}`;
         const sharedFile = new File([body], `${baseName}.txt`, { type: "text/plain" });
 
@@ -731,7 +860,7 @@
           const candidates = Array.isArray(parsed) ? parsed : parsed?.items;
           if (!Array.isArray(candidates)) throw new Error("バックアップ形式ではありません");
           if (!confirm(`現在の記録を、読み込んだ${candidates.length}件で置き換えますか？`)) return;
-          localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, items: candidates }));
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, items: candidates }));
           state.items = [];
           load();
           save();
@@ -752,7 +881,7 @@
         register({
           name: "list_last_done_items",
           title: "記録一覧を取得",
-          description: "登録済みの項目と最後に行った日時を取得します。",
+          description: "登録済みの項目、実行履歴、最後に行った日時を取得します。",
           inputSchema: { type: "object", properties: {}, additionalProperties: false },
           annotations: { readOnlyHint: true, untrustedContentHint: false },
           execute: () => ({ items: sortItems(state.items) })
