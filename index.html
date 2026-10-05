@@ -459,7 +459,7 @@
           <button class="secondary-button" id="importButton" type="button">読み込む</button>
           <input id="importFile" type="file" accept="application/json,.json,.txt" hidden>
         </div>
-        <p class="footnote">機種変更やSafariのデータ削除に備えて、時々バックアップしてください。</p>
+        <p class="footnote">機種変更やSafariのデータ削除に備えて、時々バックアップしてください。PCでは保存先を選べます。</p>
       </details>
     </main>
   </div>
@@ -822,9 +822,33 @@
       elements.exportButton.addEventListener("click", async () => {
         const body = JSON.stringify({ version: 2, exportedAt: new Date().toISOString(), items: state.items }, null, 2);
         const baseName = `last-done-backup-${new Date().toISOString().slice(0, 10)}`;
+        const fileName = `${baseName}.json`;
+        const blob = new Blob([body], { type: "application/json" });
+        const isDesktop = globalThis.matchMedia?.("(pointer: fine)").matches === true;
+
+        if (isDesktop && typeof globalThis.showSaveFilePicker === "function") {
+          try {
+            const handle = await globalThis.showSaveFilePicker({
+              suggestedName: fileName,
+              types: [{
+                description: "いつやった？ バックアップ",
+                accept: { "application/json": [".json"] }
+              }]
+            });
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            showToast(`「${handle.name || fileName}」を保存しました`);
+            return;
+          } catch (error) {
+            if (error.name === "AbortError") return;
+            console.error("保存先を選べませんでした", error);
+          }
+        }
+
         const sharedFile = new File([body], `${baseName}.txt`, { type: "text/plain" });
 
-        if (navigator.canShare?.({ files: [sharedFile] })) {
+        if (!isDesktop && navigator.canShare?.({ files: [sharedFile] })) {
           try {
             await navigator.share({
               files: [sharedFile],
@@ -838,15 +862,15 @@
           }
         }
 
-        const blob = new Blob([body], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = `${baseName}.json`;
+        link.download = fileName;
         document.body.append(link);
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`「${fileName}」をダウンロードしました。通常は「ダウンロード」フォルダにあります`);
       });
 
       elements.importButton.addEventListener("click", () => elements.importFile.click());
